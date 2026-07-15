@@ -1,20 +1,33 @@
 import sqlite3
-import json
-import requests
+import time
+from datasets import load_dataset
+from unsloth import FastLanguageModel
 
-DB_DIR = "/Users/eilberamansour/Desktop/qwen-sql-eval/minidev/MINIDEV/dev_databases/"
-QUESTIONS = "/Users/eilberamansour/Desktop/qwen-sql-eval/minidev/MINIDEV/mini_dev_sqlite.json"
+MODEL = "unsloth/Qwen2.5-1.5B-Instruct"
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name=MODEL,
+    max_seq_length = 1024,
+    load_in_4bit= False,
+)
+FastLanguageModel.for_inference(model)
 
-with open(QUESTIONS, "r") as f:
-    ds = json.load(f)
+DB_DIR = "/home/baby/sqltune/dev_databases/"
+ds = load_dataset("birdsql/bird_mini_dev")
 
-def run_query(db_path, sql):
+def run_query(db_path, sql, timeout=10):
     connection = sqlite3.connect(db_path)
+    deadline = time.time() + timeout
+    connection.set_progress_handler(lambda: 1 if time.time() > deadline else 0, 1000)
     try:
         rows = connection.execute(sql).fetchall()
     finally:
         connection.close()
     return rows
+
+def row_match(model_answer, gold_answer):
+    if model_answer is None:
+        return False
+    return set(model_answer) == set(gold_answer)
 
 def get_schema(db_path):
     rows = run_query(db_path, "SELECT sql FROM sqlite_master WHERE type='table' AND sql NOT NULL")
@@ -26,14 +39,10 @@ def ask_qwen(schema, question):
     Question: {question}
 
     Write ONE SQLite query that answer it. Output ONLY the SQL, nothing else."""
-    resp = requests.post("http://localhost:11434/api/chat", json={
-        "model": "qwen3.5:27b",
-        "messages": [{"role": "user", "content": prompt}],
-        "think": False,
-        "stream": False,
-        "options": {"num_ctx": 8192, "temperature": 0},
-    })
-    return resp.json()["message"]["content"]
+    msgs = [{"role": "user", "content": prompt}]
+    ids = tokenizer.apply_chat_template(msgs, add_generation_prompt=True, return_tensors="pt").to("cuda")
+    out = model.generate(input_ids=ids, max_new_tokens=256, do_sample=False)
+    return tokenizer.decode(out[0][ids.shape[1]:], skip_special_tokens=True)
 
 def clean_sql(text):
     text = text.strip()
@@ -43,15 +52,10 @@ def clean_sql(text):
             text = text[3:]
     return text.strip()
 
-def row_match(model_answer, gold_answer):
-    if model_answer is None:
-        return False
-    return set(model_answer) == set(gold_answer)
-
 correct = 0
 total = 0
-
-for i, ex in enumerate(ds):
+for i, ex in enumerate(ds["mini_dev_sqlite"]):
+  
     db_path = DB_DIR + ex["db_id"] +  "/" + ex["db_id"] + ".sqlite"
     schema = get_schema(db_path)
     model_sql = clean_sql(ask_qwen(schema, ex["question"]))
