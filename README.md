@@ -1,6 +1,6 @@
 # Text-to-SQL on BIRD mini-dev: baseline, prompting ablations, and LoRA SFT
 
-An eval harness measuring how well a local LLM translates English questions into SQL, using the BIRD mini-dev benchmark (~500 questions over 11 real SQLite databases) — followed by a systematic accuracy push that took qwen3.5:27b from **25.4% to ~62%** with no training, plus a LoRA fine-tuning experiment on a small model.
+An eval harness measuring how well a local LLM translates English questions into SQL, using the BIRD mini-dev benchmark (~500 questions over 11 real SQLite databases) - followed by a systematic accuracy push that took qwen3.5:27b from **25.4% to ~62%** with no training, plus a LoRA fine-tuning experiment on a small model.
 
 **Metric: execution accuracy.** The model's query and the gold query are both executed against the real database; the model scores only if the results match. Comparing results instead of SQL text matters because many different queries are correct.
 
