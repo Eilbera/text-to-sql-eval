@@ -22,6 +22,16 @@ The push was run as six rounds of ablation probes, each testing lever combinatio
 - `--sc K` — self-consistency: K samples at temp 0.7, majority vote on execution results
 - `--refine` — show the model its query's first rows and ask it to verify or fix
 
+## Why it worked with no training
+
+The model's weights never changed — the winning config changed what the model was given and how its output was handled. All of it lives in `experiments/eval_ollama_v2.py`:
+
+1. **The baseline was withholding information the benchmark provides.** BIRD ships a per-question "evidence" hint (often the exact formula or column the question means) and CSV docs explaining the cryptic column names. The baseline used neither. `--evidence` switches to the `PROMPT_EVIDENCE` template (a `Hint:` line in the prompt); `--desc` has `column_descriptions()` parse BIRD's `database_description/*.csv` files and append column-meaning comments to the schema. These two were the largest wins: the model wasn't bad at SQL, it was missing facts no amount of capability can recover.
+
+2. **The baseline gave one attempt with no feedback.** `--retry N` adds execution-guided repair (the loop in `one_chain()` inside `solve()`): the generated SQL is executed, and if SQLite throws, the error message is fed back with `RETRY_MSG` and the model gets another try. This converts typos and wrong-identifier near-misses from zero into correct answers, purely at inference time.
+
+3. **Execution accuracy grades exactly, so the prompt teaches the rubric.** A query that answers the question but returns one extra column or rounds a number scores zero. Failure-bucket analysis (`analyze.py errors`) showed this was a major loss category, so `--guidelines` appends the `GUIDELINES` rules — select exactly the requested columns, no rounding/CAST/concat, follow the hint's formula, no unnecessary joins. That's teaching the model the grading rules, not SQL.
+
 What was learned:
 
 - **Missing information beat clever inference.** The big wins were the evidence hints and column documentation — context the model didn't have — plus letting it retry on SQL errors.
